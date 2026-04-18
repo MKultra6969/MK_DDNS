@@ -1,0 +1,10 @@
+services:
+  mk_ddns:
+    build: .
+    container_name: mk_ddns_bot
+    restart: unless-stopped
+    network_mode: "host"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data

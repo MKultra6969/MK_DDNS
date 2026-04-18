@@ -1,0 +1,5 @@
+.env
+data
+OldDB
+__pycache__
+*.pyc
