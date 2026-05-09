@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 def _record_log_prefix(record: dict) -> str:
-    return f"#{record['id']} | {provider_label(record['provider'])} | {record['domain']}"
+    account_name = record.get("provider_account_name") or "account?"
+    return f"#{record['id']} | {provider_label(record['provider'])} / {account_name} | {record['domain']}"
 
 
 async def perform_ddns_update(force: bool = False) -> str | None:
@@ -54,12 +55,19 @@ async def perform_ddns_update(force: bool = False) -> str | None:
             for record in records:
                 record_prefix = _record_log_prefix(record)
                 provider = record["provider"]
+                account_name = record.get("provider_account_name") or "аккаунт не выбран"
+                if record.get("provider_account_enabled") == 0:
+                    skipped_count += 1
+                    logger.warning("%s: запись пропущена, аккаунт провайдера выключен.", record_prefix)
+                    results.append(f"{record['domain']}: пропущено, аккаунт {account_name} выключен")
+                    continue
+
                 if provider == db.PROVIDER_1984:
-                    api_key = db.get_provider_secret(db.PROVIDER_1984)
+                    api_key = record.get("provider_account_secret") or db.get_provider_secret(db.PROVIDER_1984)
                     if not api_key:
                         skipped_count += 1
                         logger.warning("%s: запись пропущена, не задан API key 1984Hosting.", record_prefix)
-                        results.append(f"🌐 {record['domain']}: пропущено, не задан API key 1984Hosting")
+                        results.append(f"🌐 {record['domain']} ({account_name}): пропущено, не задан API key 1984Hosting")
                         continue
 
                     result = await providers.update_1984_record(
@@ -84,15 +92,15 @@ async def perform_ddns_update(force: bool = False) -> str | None:
                             result["message"],
                         )
                     status = "✅" if result["success"] else "❌"
-                    results.append(f"🌐 {record['domain']}: {status} {result['message']}")
+                    results.append(f"🌐 {record['domain']} ({account_name}): {status} {result['message']}")
                     continue
 
                 if provider == db.PROVIDER_CLOUDFLARE:
-                    token = db.get_provider_secret(db.PROVIDER_CLOUDFLARE)
+                    token = record.get("provider_account_secret") or db.get_provider_secret(db.PROVIDER_CLOUDFLARE)
                     if not token:
                         skipped_count += 1
                         logger.warning("%s: запись пропущена, не задан Cloudflare token.", record_prefix)
-                        results.append(f"☁️ {record['domain']}: пропущено, не задан Cloudflare token")
+                        results.append(f"☁️ {record['domain']} ({account_name}): пропущено, не задан Cloudflare token")
                         continue
 
                     if not record["zone_id"] or not record["zone_name"]:
@@ -101,7 +109,7 @@ async def perform_ddns_update(force: bool = False) -> str | None:
                             "%s: запись пропущена, не указаны zone_id/zone_name Cloudflare.",
                             record_prefix,
                         )
-                        results.append(f"☁️ {record['domain']}: пропущено, не задана зона Cloudflare")
+                        results.append(f"☁️ {record['domain']} ({account_name}): пропущено, не задана зона Cloudflare")
                         continue
 
                     result = await providers.ensure_cloudflare_a_record(
@@ -136,14 +144,21 @@ async def perform_ddns_update(force: bool = False) -> str | None:
                             result["message"],
                         )
                     status = "✅" if result["success"] else "❌"
-                    results.append(f"☁️ {record['domain']}: {status} {result['message']}")
+                    results.append(f"☁️ {record['domain']} ({account_name}): {status} {result['message']}")
                     continue
 
                 failed_count += 1
                 logger.warning("%s: запись не обработана, неизвестный провайдер %s.", record_prefix, provider)
                 results.append(f"{record['domain']}: ❌ неизвестный провайдер {provider}")
 
-            db.set_last_global_ip(current_ip)
+            if failed_count == 0:
+                db.set_last_global_ip(current_ip)
+            else:
+                logger.warning(
+                    "Текущий IP %s не сохранен как полностью примененный: ошибок=%s.",
+                    current_ip,
+                    failed_count,
+                )
             logger.info(
                 "DDNS-обновление завершено: IP=%s, успешно=%s, ошибок=%s, пропущено=%s.",
                 current_ip,

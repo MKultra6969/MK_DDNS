@@ -19,6 +19,7 @@ def add_record(
     proxied: bool = False,
     ttl: int = 1,
     provider_record_id: str | None = None,
+    provider_account_id: int | None = None,
 ) -> bool:
     try:
         with _connect() as conn:
@@ -34,8 +35,9 @@ def add_record(
                     proxied,
                     ttl,
                     provider_record_id,
+                    provider_account_id,
                     enabled
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
                 (
                     provider,
@@ -47,6 +49,7 @@ def add_record(
                     int(proxied),
                     ttl,
                     provider_record_id,
+                    provider_account_id,
                 ),
             )
         logger.info("Создана запись #%s: %s | %s", cursor.lastrowid, provider_label(provider), domain)
@@ -58,25 +61,31 @@ def add_record(
 def list_records(provider: str | None = None) -> list[dict[str, Any]]:
     query = """
         SELECT
-            id,
-            provider,
-            domain,
-            zone_id,
-            zone_name,
-            record_name,
-            record_type,
-            proxied,
-            ttl,
-            provider_record_id,
-            enabled,
-            created_at
+            dns_records.id,
+            dns_records.provider,
+            dns_records.domain,
+            dns_records.zone_id,
+            dns_records.zone_name,
+            dns_records.record_name,
+            dns_records.record_type,
+            dns_records.proxied,
+            dns_records.ttl,
+            dns_records.provider_record_id,
+            dns_records.provider_account_id,
+            provider_accounts.name AS provider_account_name,
+            provider_accounts.secret AS provider_account_secret,
+            provider_accounts.enabled AS provider_account_enabled,
+            dns_records.enabled,
+            dns_records.created_at
         FROM dns_records
+        LEFT JOIN provider_accounts
+            ON provider_accounts.id = dns_records.provider_account_id
     """
     params: tuple[Any, ...] = ()
     if provider:
-        query += " WHERE provider = ?"
+        query += " WHERE dns_records.provider = ?"
         params = (provider,)
-    query += " ORDER BY provider, domain"
+    query += " ORDER BY dns_records.provider, provider_account_name, dns_records.domain"
 
     with _connect() as conn:
         rows = conn.execute(query, params).fetchall()
@@ -89,20 +98,26 @@ def get_record(record_id: int) -> dict[str, Any] | None:
         row = conn.execute(
             """
             SELECT
-                id,
-                provider,
-                domain,
-                zone_id,
-                zone_name,
-                record_name,
-                record_type,
-                proxied,
-                ttl,
-                provider_record_id,
-                enabled,
-                created_at
+                dns_records.id,
+                dns_records.provider,
+                dns_records.domain,
+                dns_records.zone_id,
+                dns_records.zone_name,
+                dns_records.record_name,
+                dns_records.record_type,
+                dns_records.proxied,
+                dns_records.ttl,
+                dns_records.provider_record_id,
+                dns_records.provider_account_id,
+                provider_accounts.name AS provider_account_name,
+                provider_accounts.secret AS provider_account_secret,
+                provider_accounts.enabled AS provider_account_enabled,
+                dns_records.enabled,
+                dns_records.created_at
             FROM dns_records
-            WHERE id = ?
+            LEFT JOIN provider_accounts
+                ON provider_accounts.id = dns_records.provider_account_id
+            WHERE dns_records.id = ?
             """,
             (record_id,),
         ).fetchone()
@@ -118,6 +133,7 @@ def update_record(
     proxied: bool | None = None,
     ttl: int | None = None,
     provider_record_id: str | None = None,
+    provider_account_id: int | None = None,
 ) -> None:
     record = get_record(record_id)
     assignments: list[str] = []
@@ -141,6 +157,9 @@ def update_record(
     if provider_record_id is not None:
         assignments.append("provider_record_id = ?")
         params.append(provider_record_id)
+    if provider_account_id is not None:
+        assignments.append("provider_account_id = ?")
+        params.append(provider_account_id)
 
     if not assignments:
         return
@@ -166,6 +185,8 @@ def update_record(
             changes.append(f"ttl={ttl}")
         if provider_record_id is not None and provider_record_id != record["provider_record_id"]:
             changes.append("provider_record_id обновлен")
+        if provider_account_id is not None and provider_account_id != record["provider_account_id"]:
+            changes.append(f"provider_account_id={provider_account_id}")
 
         if changes:
             logger.info(

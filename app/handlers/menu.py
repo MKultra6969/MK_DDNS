@@ -22,15 +22,10 @@ from app.ui import (
 router = Router()
 
 
-async def show_main_menu_message(message: types.Message) -> None:
-    await message.answer(build_main_text(), reply_markup=main_inline_keyboard())
-
-
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(build_main_text(), reply_markup=main_reply_keyboard())
-    await show_main_menu_message(message)
 
 
 @router.message(Command("menu"))
@@ -38,7 +33,6 @@ async def cmd_start(message: types.Message, state: FSMContext) -> None:
 async def cmd_menu(message: types.Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(build_main_text(), reply_markup=main_reply_keyboard())
-    await show_main_menu_message(message)
 
 
 @router.message(Command("providers"))
@@ -85,8 +79,10 @@ async def cmd_check(message: types.Message, state: FSMContext) -> None:
 @router.message(F.text == "Отмена ввода")
 async def cmd_cancel(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("Текущий ввод отменен.", reply_markup=main_reply_keyboard())
-    await show_main_menu_message(message)
+    await message.answer(
+        f"Текущий ввод отменен.\n\n{build_main_text()}",
+        reply_markup=main_reply_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "menu:home")

@@ -30,20 +30,18 @@ def main_inline_keyboard() -> InlineKeyboardMarkup:
 
 
 def providers_inline_keyboard() -> InlineKeyboardMarkup:
-    key_1984 = "✅" if db.get_provider_secret(db.PROVIDER_1984) else "❌"
-    key_cf = "✅" if db.get_provider_secret(db.PROVIDER_CLOUDFLARE) else "❌"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=f"{key_1984} 1984Hosting API key",
-                    callback_data="provider:set:1984",
+                    text="Добавить 1984Hosting",
+                    callback_data="provider:add:1984",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text=f"{key_cf} Cloudflare API token",
-                    callback_data="provider:set:cloudflare",
+                    text="Добавить Cloudflare",
+                    callback_data="provider:add:cloudflare",
                 )
             ],
             [InlineKeyboardButton(text="Назад", callback_data="menu:home")],
@@ -78,6 +76,25 @@ def back_to_providers_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Главное меню", callback_data="menu:home")],
         ]
     )
+
+
+def provider_accounts_inline_keyboard(
+    accounts: list[dict],
+    *,
+    callback_prefix: str,
+    back_callback: str = "menu:records",
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"{account['name']}",
+                callback_data=f"{callback_prefix}:{account['id']}",
+            )
+        ]
+        for account in accounts
+    ]
+    rows.append([InlineKeyboardButton(text="Назад", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def zone_inline_keyboard(zones: list[dict[str, str]]) -> InlineKeyboardMarkup:
@@ -116,10 +133,11 @@ def records_list_keyboard(records: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for record in records:
         icon = "☁️" if record["provider"] == db.PROVIDER_CLOUDFLARE else "🌐"
+        account_name = record.get("provider_account_name") or "?"
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{icon} Удалить #{record['id']} {record['domain']}",
+                    text=f"{icon} Удалить #{record['id']} {account_name}: {record['domain']}",
                     callback_data=f"record:delete:{record['id']}",
                 )
             ]

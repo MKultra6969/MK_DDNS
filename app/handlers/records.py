@@ -14,6 +14,7 @@ from app.ui import (
     build_records_text,
     delete_confirm_keyboard,
     main_reply_keyboard,
+    provider_accounts_inline_keyboard,
     proxied_inline_keyboard,
     records_inline_keyboard,
     records_list_keyboard,
@@ -27,28 +28,74 @@ logger = logging.getLogger(__name__)
 
 @router.callback_query(F.data == "records:add:1984")
 async def records_add_1984(call: types.CallbackQuery, state: FSMContext) -> None:
+    accounts = [
+        account
+        for account in db.list_provider_accounts(db.PROVIDER_1984)
+        if account["enabled"] and account["secret"]
+    ]
+    if not accounts:
+        await call.answer("Сначала добавьте аккаунт 1984Hosting.", show_alert=True)
+        return
+
     await state.clear()
+    await call.answer()
+    await call.message.answer(
+        "Выберите аккаунт 1984Hosting для новой записи.",
+        reply_markup=provider_accounts_inline_keyboard(
+            accounts,
+            callback_prefix="records:account:1984",
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("records:account:1984:"))
+async def records_1984_account_selected(call: types.CallbackQuery, state: FSMContext) -> None:
+    try:
+        account_id = int(call.data.rsplit(":", 1)[1])
+    except ValueError:
+        await call.answer()
+        return
+
+    account = db.get_provider_account_by_id(account_id)
+    if not account or account["provider"] != db.PROVIDER_1984 or not account["secret"]:
+        await call.answer("Аккаунт 1984Hosting не найден или не настроен.", show_alert=True)
+        return
+
+    await state.clear()
+    await state.update_data(selected_provider_account=account)
     await state.set_state(DDNSFSM.add_1984_domain)
     await call.answer()
     await call.message.answer(
-        "Введите полный домен для 1984Hosting.\nПример: home.example.com",
+        f"Аккаунт: {account['name']}\nВведите полный домен для 1984Hosting.\nПример: home.example.com",
         reply_markup=back_to_records_keyboard(),
     )
 
 
 @router.message(DDNSFSM.add_1984_domain)
 async def process_add_1984_domain(message: types.Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    account = data.get("selected_provider_account")
+    if not account:
+        await state.clear()
+        await message.answer("Аккаунт провайдера не выбран. Начните добавление заново.")
+        return
+
     domain = (message.text or "").strip().lower().rstrip(".")
     if not domain or "." not in domain:
         await message.answer("Нужен полный домен, например home.example.com")
         return
 
-    created = db.add_record(db.PROVIDER_1984, domain)
+    created = db.add_record(
+        db.PROVIDER_1984,
+        domain,
+        provider_account_id=account["id"],
+    )
     if created:
         logger.info(
-            "Добавлена DNS-запись: %s | %s | admin_id=%s.",
+            "Добавлена DNS-запись: %s | %s | account=%s | admin_id=%s.",
             provider_label(db.PROVIDER_1984),
             domain,
+            account["name"],
             message.from_user.id if message.from_user else "unknown",
         )
     else:
@@ -62,7 +109,7 @@ async def process_add_1984_domain(message: types.Message, state: FSMContext) -> 
     text = (
         f"Запись {domain} уже существует."
         if not created
-        else f"Запись {domain} добавлена для 1984Hosting."
+        else f"Запись {domain} добавлена для 1984Hosting / {account['name']}."
     )
     await message.answer(text, reply_markup=main_reply_keyboard())
     await message.answer(build_records_text(db.list_records()), reply_markup=records_inline_keyboard())
@@ -70,13 +117,41 @@ async def process_add_1984_domain(message: types.Message, state: FSMContext) -> 
 
 @router.callback_query(F.data == "records:add:cloudflare")
 async def records_add_cloudflare(call: types.CallbackQuery, state: FSMContext) -> None:
-    token = db.get_provider_secret(db.PROVIDER_CLOUDFLARE)
-    if not token:
-        await call.answer("Сначала задайте Cloudflare token.", show_alert=True)
+    accounts = [
+        account
+        for account in db.list_provider_accounts(db.PROVIDER_CLOUDFLARE)
+        if account["enabled"] and account["secret"]
+    ]
+    if not accounts:
+        await call.answer("Сначала добавьте Cloudflare-аккаунт.", show_alert=True)
+        return
+
+    await state.clear()
+    await call.answer()
+    await call.message.answer(
+        "Выберите Cloudflare-аккаунт для новой записи.",
+        reply_markup=provider_accounts_inline_keyboard(
+            accounts,
+            callback_prefix="records:account:cloudflare",
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("records:account:cloudflare:"))
+async def records_cloudflare_account_selected(call: types.CallbackQuery, state: FSMContext) -> None:
+    try:
+        account_id = int(call.data.rsplit(":", 1)[1])
+    except ValueError:
+        await call.answer()
+        return
+
+    account = db.get_provider_account_by_id(account_id)
+    if not account or account["provider"] != db.PROVIDER_CLOUDFLARE or not account["secret"]:
+        await call.answer("Cloudflare-аккаунт не найден или не настроен.", show_alert=True)
         return
 
     async with aiohttp.ClientSession() as session:
-        zones_result = await providers.list_cloudflare_zones(session, token)
+        zones_result = await providers.list_cloudflare_zones(session, account["secret"])
 
     if not zones_result["success"]:
         await call.answer("Не удалось получить зоны Cloudflare.", show_alert=True)
@@ -92,10 +167,10 @@ async def records_add_cloudflare(call: types.CallbackQuery, state: FSMContext) -
         return
 
     await state.clear()
-    await state.update_data(cf_zones=zones)
+    await state.update_data(cf_zones=zones, selected_provider_account=account)
     await call.answer()
     await call.message.answer(
-        "Выберите Cloudflare-зону для новой записи.",
+        f"Аккаунт: {account['name']}\nВыберите Cloudflare-зону для новой записи.",
         reply_markup=zone_inline_keyboard(zones),
     )
 
@@ -150,11 +225,12 @@ async def process_cloudflare_name(message: types.Message, state: FSMContext) -> 
 async def process_cloudflare_proxied(call: types.CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     zone = data.get("selected_zone")
+    account = data.get("selected_provider_account")
     fqdn = data.get("pending_cloudflare_domain")
     record_name = data.get("pending_cloudflare_record_name")
     proxied = call.data.endswith(":1")
 
-    if not zone or not fqdn or record_name is None:
+    if not zone or not account or not fqdn or record_name is None:
         await state.clear()
         await call.answer("Состояние добавления потеряно. Начните заново.", show_alert=True)
         return
@@ -167,12 +243,14 @@ async def process_cloudflare_proxied(call: types.CallbackQuery, state: FSMContex
         record_name=record_name,
         proxied=proxied,
         ttl=1,
+        provider_account_id=account["id"],
     )
     if created:
         logger.info(
-            "Добавлена DNS-запись: %s | %s | zone=%s | proxied=%s | admin_id=%s.",
+            "Добавлена DNS-запись: %s | %s | account=%s | zone=%s | proxied=%s | admin_id=%s.",
             provider_label(db.PROVIDER_CLOUDFLARE),
             fqdn,
+            account["name"],
             zone["name"],
             proxied,
             call.from_user.id,
@@ -188,7 +266,11 @@ async def process_cloudflare_proxied(call: types.CallbackQuery, state: FSMContex
     await state.clear()
     await call.answer()
 
-    text = f"Cloudflare-запись {fqdn} добавлена." if created else f"Запись {fqdn} уже существует."
+    text = (
+        f"Cloudflare-запись {fqdn} добавлена для аккаунта {account['name']}."
+        if created
+        else f"Запись {fqdn} уже существует в этом аккаунте."
+    )
     await call.message.answer(text, reply_markup=main_reply_keyboard())
     await call.message.answer(build_records_text(db.list_records()), reply_markup=records_inline_keyboard())
 
