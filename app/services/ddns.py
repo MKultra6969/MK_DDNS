@@ -5,7 +5,7 @@ from aiogram import Bot
 import aiohttp
 
 from app import db, providers
-from app.config import ADMIN_ID, CHECK_INTERVAL
+from app.config import ADMIN_ID, CHECK_INTERVAL, ALERT_THREAD_ID, ALERT_CHANNEL_ID
 from app.services.domains import provider_label
 from app.ui.keyboards import main_reply_keyboard
 
@@ -178,8 +178,9 @@ async def ddns_loop(bot: Bot) -> None:
         report = await perform_ddns_update(force=False)
         if report:
             await bot.send_message(
-                ADMIN_ID,
-                report,
+                chat_id=ALERT_CHANNEL_ID,
+                text=report,
+                message_thread_id = ALERT_THREAD_ID or None,
                 reply_markup=main_reply_keyboard(),
             )
         await asyncio.sleep(CHECK_INTERVAL)
